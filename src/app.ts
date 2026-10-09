@@ -99,6 +99,7 @@ export function createApp(db: DatabaseSync) {
     }
 
     const key = normalizeKey(rawKey);
+    if (!key) return c.json({ error: "chave de idempotência vazia" }, 400);
     const existing = one<Ledger>(db, "SELECT * FROM ledger WHERE idempotency_key = ?", key);
     if (existing) {
       const payout = one<Payout>(db, "SELECT * FROM payouts WHERE mission_id = ?", mission.id) ?? null;
