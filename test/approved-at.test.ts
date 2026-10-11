@@ -36,15 +36,23 @@ describe("datas impossíveis são 400 e não têm nenhum efeito", () => {
     expect(db.prepare("SELECT status FROM missions WHERE id = 'msn_1900'").get()).toEqual({ status: "open" });
   });
 
+  it("o ano é lido literalmente: 0099 é o ano 99, não 1999 (Date.UTC trataria como 1900+), e não há piso de negócio no contrato", () => {
+    expect(parseApprovedAt("0099-01-01T00:00:00Z")?.toISOString()).toBe("0099-01-01T00:00:00.000Z");
+    expect(parseApprovedAt("0001-06-15T12:00:00Z")?.toISOString()).toBe("0001-06-15T12:00:00.000Z");
+    expect(parseApprovedAt("1969-12-31T23:59:59Z")?.toISOString()).toBe("1969-12-31T23:59:59.000Z");
+    expect(parseApprovedAt("0000-01-01T00:00:00Z")).toBeNull(); // o ano 0000 não existe no calendário ISO usado aqui (começa em 0001)
+  });
+
   it.each([
-    ["ano 99 (Date.UTC trataria como 1999)", "0099-01-01T00:00:00Z"],
-    ["ano 1", "0001-01-01T00:00:00Z"],
-    ["ano 0", "0000-01-01T00:00:00Z"],
-    ["antes de 1970", "1969-12-31T23:59:59Z"],
-    ["ano 9999 sem offset (viraria o ano 10000 em UTC)", "9999-12-31T23:59:59"],
+    ["ano 9999 sem offset (em UTC vira o ano 10000)", "9999-12-31T23:59:59"],
     ["ano 9999 com offset negativo", "9999-12-31T23:59:59-03:00"],
-  ])("ano fora de 1970 a 9998 é recusado, não 'consertado': %s", (_name, input) => {
+    ["ano 0001 com offset positivo (em UTC vira o ano 0)", "0001-01-01T00:30:00+01:00"],
+  ])("só o que não cabe no ISO de 4 dígitos depois da conversão para UTC é recusado: %s", (_name, input) => {
     expect(parseApprovedAt(input)).toBeNull();
+  });
+  it("o último instante que cabe em 4 dígitos vale", () => {
+    expect(parseApprovedAt("9999-12-31T23:59:59Z")?.toISOString()).toBe("9999-12-31T23:59:59.000Z");
+    expect(parseApprovedAt("9999-12-31T23:59:59+03:00")?.toISOString()).toBe("9999-12-31T20:59:59.000Z");
   });
 
   it("hora civil que não existe em São Paulo (pulo do horário de verão) é recusada, em vez de cair no dia anterior", () => {

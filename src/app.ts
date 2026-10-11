@@ -51,11 +51,13 @@ export function createApp(db: DatabaseSync) {
     if (!mission) return c.json({ error: "missão não encontrada" }, 404);
     const ledger = db.prepare("SELECT * FROM ledger WHERE mission_id = ? ORDER BY created_at").all(mission.id);
     const payout = one<Payout>(db, "SELECT * FROM payouts WHERE mission_id = ?", mission.id) ?? null;
-    // Só os 100 callbacks mais recentes, em ordem cronológica: a rota não tem autenticação e a tabela cresce a cada callback.
+    // A RESPOSTA traz só os 100 callbacks mais recentes, em ordem cronológica (a rota não tem autenticação e a tabela cresce a cada
+    // callback). O limite é da consulta: a tabela guarda todos, e `provider_events_total` diz quantos existem.
     const providerEvents = payout
       ? (db.prepare("SELECT * FROM (SELECT * FROM provider_events WHERE payout_id = ? ORDER BY id DESC LIMIT 100) ORDER BY id").all(payout.id) as unknown[])
       : [];
-    return c.json({ mission, ledger, payout, provider_events: providerEvents });
+    const total = payout ? (one<{ n: number }>(db, "SELECT COUNT(*) AS n FROM provider_events WHERE payout_id = ?", payout.id)?.n ?? 0) : 0;
+    return c.json({ mission, ledger, payout, provider_events: providerEvents, provider_events_total: total, provider_events_returned: providerEvents.length });
   });
 
   app.post("/approvals", async (c) => {

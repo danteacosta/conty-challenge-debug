@@ -75,13 +75,18 @@ describe("pago é terminal: um callback atrasado não desfaz o repasse", () => {
   });
 
   it("o histórico de callbacks devolvido é limitado aos 100 mais recentes, em ordem cronológica", async () => {
-    const { app } = fresh();
+    const { app, db } = fresh();
     const payout = await approvedPayout(app);
     for (let i = 0; i < 130; i += 1) await callback(app, payout, i === 129 ? "CONFIRMED" : "PENDING");
-    const { provider_events: events } = await mission(app, "msn_1900");
+    const view = await mission(app, "msn_1900");
+    const events = view.provider_events;
     expect(events).toHaveLength(100);
     expect(events.at(-1)).toMatchObject({ provider_status: "CONFIRMED", outcome: "applied" });
     expect(events[0].id).toBeLessThan(events[1].id);
+    // O limite é só da consulta: a resposta diz quantos existem e o histórico persistido continua inteiro.
+    expect(view.provider_events_total).toBe(130);
+    expect(view.provider_events_returned).toBe(100);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM provider_events WHERE payout_id = ?").get(payout)).toEqual({ n: 130 });
   });
 
   it("status desconhecido continua sendo 400 e não registra evento", async () => {
