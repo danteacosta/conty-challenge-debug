@@ -73,7 +73,7 @@ export function createApp(db: DatabaseSync) {
     // Data inexistente ou em formato fora do ISO-8601 é 400, sem efeito nenhum. Sem offset vale o horário civil de São Paulo.
     const approvedInstant = parseApprovedAt(approvedAt.trim());
     if (!approvedInstant) {
-      return c.json({ error: "data de aprovação inválida: use ISO-8601 (AAAA-MM-DDTHH:mm[:ss[.fff]]) com Z ou offset; sem offset vale o horário de America/Sao_Paulo" }, 400);
+      return c.json({ error: "data de aprovação inválida: use ISO-8601 (AAAA-MM-DDTHH:mm[:ss[.fff...]], até 9 dígitos de fração, com T e Z maiúsculos) e Z ou ±HH:MM; sem offset vale o horário de America/Sao_Paulo" }, 400);
     }
     const approvedAtIso = approvedInstant.toISOString();
 

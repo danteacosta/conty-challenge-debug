@@ -23,10 +23,17 @@ const parts = new Intl.DateTimeFormat("en-CA", {
   second: "2-digit",
 });
 
+/** `Date.UTC` com o ano LITERAL: o `Date.UTC` puro trata anos de 0 a 99 como 1900 a 1999. */
+function utcMs(year: number, month: number, day: number, hour = 0, minute = 0, second = 0, millis = 0): number {
+  const date = new Date(Date.UTC(2000, month, day, hour, minute, second, millis));
+  date.setUTCFullYear(year);
+  return date.getTime();
+}
+
 /** Quanto o relógio civil de São Paulo está à frente do UTC, em ms, num instante (negativo em UTC−3). */
 function zoneOffsetMs(instant: number): number {
   const p = Object.fromEntries(parts.formatToParts(new Date(instant)).map((part) => [part.type, part.value]));
-  const asUtc = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second));
+  const asUtc = utcMs(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second));
   return asUtc - Math.floor(instant / 1000) * 1000;
 }
 
@@ -40,10 +47,7 @@ export function parseApprovedAt(input: string): Date | null {
   // ano 0000 (o ISO usado aqui começa em 0001) e, mais abaixo, o instante que não cabe em 4 dígitos depois de ir para UTC.
   if (year < MIN_YEAR || year > MAX_YEAR) return null;
   if (month < 1 || month > 12 || day < 1 || hour > 23 || minute > 59 || second > 59) return null;
-  // Date.UTC trata anos de 0 a 99 como 1900 a 1999; setUTCFullYear lê o ano literalmente.
-  const base = new Date(Date.UTC(2000, month - 1, day, hour, minute, second, millis));
-  base.setUTCFullYear(year);
-  const civil = base.getTime();
+  const civil = utcMs(year, month - 1, day, hour, minute, second, millis);
   if (new Date(civil).getUTCDate() !== day || new Date(civil).getUTCMonth() !== month - 1) return null; // o dia não existe neste mês (30 de fevereiro, 29 em ano não bissexto)
 
   const fits = (instant: number) => {

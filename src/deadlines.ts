@@ -10,7 +10,8 @@ const diaCivil = new Intl.DateTimeFormat("en-CA", {
 
 export function approvedCivilDay(approvedAt: string): string {
   const parts = Object.fromEntries(diaCivil.formatToParts(new Date(approvedAt)).map((part) => [part.type, part.value]));
-  return `${parts.year}-${parts.month}-${parts.day}`;
+  // O ano com 4 dígitos: a comparação com o prazo é de texto, e "99-06-15" > "2026-03-12" daria prazo encerrado para o ano 99.
+  return `${String(parts.year).padStart(4, "0")}-${parts.month}-${parts.day}`;
 }
 
 export function isPastDeadline(approvedAt: string, deadlineDate: string): boolean {

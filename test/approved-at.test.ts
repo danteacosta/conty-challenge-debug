@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.ts";
 import { parseApprovedAt } from "../src/approved-at.ts";
 import { openDatabase } from "../src/db.ts";
+import { approvedCivilDay } from "../src/deadlines.ts";
 import { seedIncident } from "../src/seed.ts";
 
 type App = ReturnType<typeof createApp>;
@@ -50,6 +51,14 @@ describe("datas impossíveis são 400 e não têm nenhum efeito", () => {
   ])("só o que não cabe no ISO de 4 dígitos depois da conversão para UTC é recusado: %s", (_name, input) => {
     expect(parseApprovedAt(input)).toBeNull();
   });
+  it("anos de 0001 a 0099 também valem SEM offset (horário civil de São Paulo, com o LMT da época)", () => {
+    expect(parseApprovedAt("0001-06-15T12:00:00")?.toISOString()).toBe("0001-06-15T15:06:28.000Z");
+    expect(parseApprovedAt("0099-06-15T12:00:00")?.toISOString()).toBe("0099-06-15T15:06:28.000Z");
+    expect(parseApprovedAt("0004-02-29T12:00:00")?.toISOString()).toBe("0004-02-29T15:06:28.000Z"); // bissexto
+    expect(parseApprovedAt("0100-06-15T12:00:00")?.toISOString()).toBe("0100-06-15T15:06:28.000Z");
+    expect(parseApprovedAt("0099-02-29T12:00:00")).toBeNull();
+  });
+
   it("o último instante que cabe em 4 dígitos vale", () => {
     expect(parseApprovedAt("9999-12-31T23:59:59Z")?.toISOString()).toBe("9999-12-31T23:59:59.000Z");
     expect(parseApprovedAt("9999-12-31T23:59:59+03:00")?.toISOString()).toBe("9999-12-31T20:59:59.000Z");
@@ -78,6 +87,27 @@ describe("datas impossíveis são 400 e não têm nenhum efeito", () => {
     expect(parseApprovedAt("2028-02-29T10:00:00Z")?.toISOString()).toBe("2028-02-29T10:00:00.000Z");
     expect(parseApprovedAt("2026-02-29T10:00:00Z")).toBeNull();
   });
+});
+
+describe("o dia civil do prazo tem sempre 4 dígitos de ano", () => {
+  it.each([
+    ["0001-06-15T12:00:00Z", "0001-06-15"],
+    ["0099-06-15T12:00:00Z", "0099-06-15"],
+    ["0203-06-15T12:00:00Z", "0203-06-15"],
+    ["0999-12-31T12:00:00Z", "0999-12-31"],
+    ["2026-03-12T12:00:00Z", "2026-03-12"],
+  ])("%s → %s", (input, expected) => {
+    expect(approvedCivilDay(input)).toBe(expected);
+  });
+
+  it.each(["0001-06-15T12:00:00Z", "0099-06-15T12:00:00Z", "0203-06-15T12:00:00Z", "0500-06-15T12:00:00Z", "0999-06-15T12:00:00Z", "1000-06-15T12:00:00Z"])(
+    "uma aprovação em %s é anterior ao prazo de 2026 e é aceita (antes comparava texto sem zero à esquerda e dava 409)",
+    async (approved_at) => {
+      const { app } = fresh();
+      const res = await post(app, { mission_id: "msn_1842", approved_at, idempotency_key: "k1" });
+      expect(res.status).toBe(201);
+    },
+  );
 });
 
 describe("entrada sem offset é horário civil de America/Sao_Paulo, em qualquer fuso do processo", () => {
