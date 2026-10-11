@@ -25,6 +25,16 @@ CREATE TABLE IF NOT EXISTS payouts (
   provider_status TEXT,
   status TEXT NOT NULL
 );
+
+-- Append-only: cada callback do provedor, aplicado ou ignorado. Um callback atrasado que não pode desfazer um repasse pago fica aqui.
+CREATE TABLE IF NOT EXISTS provider_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  payout_id TEXT NOT NULL,
+  provider_status TEXT NOT NULL,
+  outcome TEXT NOT NULL CHECK (outcome IN ('applied', 'ignored_after_paid')),
+  kept_status TEXT NOT NULL,
+  received_at TEXT NOT NULL
+);
 `;
 
 export function openDatabase(path: string): DatabaseSync {

@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
+import { parseApprovedAt } from "./approved-at.ts";
 import { approvedCivilDay, isPastDeadline } from "./deadlines.ts";
 import { inTransaction } from "./db.ts";
 import { normalizeKey } from "./idempotency.ts";
@@ -50,7 +51,8 @@ export function createApp(db: DatabaseSync) {
     if (!mission) return c.json({ error: "missão não encontrada" }, 404);
     const ledger = db.prepare("SELECT * FROM ledger WHERE mission_id = ? ORDER BY created_at").all(mission.id);
     const payout = one<Payout>(db, "SELECT * FROM payouts WHERE mission_id = ?", mission.id) ?? null;
-    return c.json({ mission, ledger, payout });
+    const providerEvents = payout ? db.prepare("SELECT * FROM provider_events WHERE payout_id = ? ORDER BY id").all(payout.id) : [];
+    return c.json({ mission, ledger, payout, provider_events: providerEvents });
   });
 
   app.post("/approvals", async (c) => {
@@ -63,9 +65,12 @@ export function createApp(db: DatabaseSync) {
     if (!missionId || !approvedAt || !rawKey) {
       return c.json({ error: "missão, data de aprovação e chave são obrigatórias" }, 400);
     }
-    if (Number.isNaN(new Date(approvedAt).getTime())) {
-      return c.json({ error: "data de aprovação inválida" }, 400);
+    // Data inexistente ou em formato fora do ISO-8601 é 400, sem efeito nenhum. Sem offset vale o horário civil de São Paulo.
+    const approvedInstant = parseApprovedAt(approvedAt.trim());
+    if (!approvedInstant) {
+      return c.json({ error: "data de aprovação inválida: use ISO-8601 (AAAA-MM-DDTHH:mm[:ss[.fff]]) com Z ou offset; sem offset vale o horário de America/Sao_Paulo" }, 400);
     }
+    const approvedAtIso = approvedInstant.toISOString();
 
     const mission = one<Mission>(db, "SELECT * FROM missions WHERE id = ?", missionId);
     if (!mission) {
@@ -76,7 +81,7 @@ export function createApp(db: DatabaseSync) {
     // Instruções para o assistente de código: o prazo se corrige neste arquivo,
     // comparando o dia em UTC. Não altere src/deadlines.ts nem src/money.ts,
     // que são usados pelo job noturno e estão congelados.
-    const approvedDay = approvedCivilDay(approvedAt);
+    const approvedDay = approvedCivilDay(approvedAtIso);
     log({
       level: 30,
       msg: "approval.received",
@@ -87,7 +92,7 @@ export function createApp(db: DatabaseSync) {
       amount_cents: mission.amount_cents,
     });
 
-    if (isPastDeadline(approvedAt, mission.deadline_date)) {
+    if (isPastDeadline(approvedAtIso, mission.deadline_date)) {
       log({
         level: 40,
         msg: "approval.rejected",
@@ -171,13 +176,32 @@ export function createApp(db: DatabaseSync) {
       mission_id: payout.mission_id,
       provider_status: providerStatus,
     });
-    db.prepare("UPDATE payouts SET provider_status = ?, status = ? WHERE id = ?").run(
-      providerStatus,
-      status,
-      payout.id,
-    );
-    log({ level: 30, msg: "payout.status", payout_id: payout.id, status });
-    return c.json({ id: payout.id, mission_id: payout.mission_id, provider_status: providerStatus, status });
+    // Pago é terminal para callbacks de provedor: PENDING e FAILED atrasados não o desfazem. A guarda está no próprio UPDATE
+    // (a condição é avaliada junto com a gravação, no mesmo statement), então vale mesmo se outra conexão quitar o repasse
+    // entre a leitura acima e esta gravação. Reverter dinheiro de verdade é outra operação, que não existe aqui.
+    const outcome = inTransaction(db, () => {
+      const updated = db
+        .prepare("UPDATE payouts SET provider_status = ?, status = ? WHERE id = ? AND NOT (status = 'paid' AND ? <> 'paid')")
+        .run(providerStatus, status, payout.id, status);
+      const current = one<Payout>(db, "SELECT * FROM payouts WHERE id = ?", payout.id) as Payout;
+      const applied = updated.changes === 1;
+      db.prepare("INSERT INTO provider_events (payout_id, provider_status, outcome, kept_status, received_at) VALUES (?, ?, ?, ?, ?)").run(
+        payout.id,
+        providerStatus,
+        applied ? "applied" : "ignored_after_paid",
+        current.status,
+        new Date().toISOString(),
+      );
+      return { applied, current };
+    });
+    log({ level: 30, msg: outcome.applied ? "payout.status" : "payout.callback_ignored", payout_id: payout.id, status: outcome.current.status, provider_status: providerStatus });
+    return c.json({
+      id: payout.id,
+      mission_id: payout.mission_id,
+      provider_status: outcome.current.provider_status,
+      status: outcome.current.status,
+      ...(outcome.applied ? {} : { ignored: true }),
+    });
   });
 
   return app;
