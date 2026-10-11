@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS provider_events (
   kept_status TEXT NOT NULL,
   received_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS provider_events_payout ON provider_events (payout_id, id);
 `;
 
 export function openDatabase(path: string): DatabaseSync {

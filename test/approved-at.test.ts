@@ -36,6 +36,36 @@ describe("datas impossíveis são 400 e não têm nenhum efeito", () => {
     expect(db.prepare("SELECT status FROM missions WHERE id = 'msn_1900'").get()).toEqual({ status: "open" });
   });
 
+  it.each([
+    ["ano 99 (Date.UTC trataria como 1999)", "0099-01-01T00:00:00Z"],
+    ["ano 1", "0001-01-01T00:00:00Z"],
+    ["ano 0", "0000-01-01T00:00:00Z"],
+    ["antes de 1970", "1969-12-31T23:59:59Z"],
+    ["ano 9999 sem offset (viraria o ano 10000 em UTC)", "9999-12-31T23:59:59"],
+    ["ano 9999 com offset negativo", "9999-12-31T23:59:59-03:00"],
+  ])("ano fora de 1970 a 9998 é recusado, não 'consertado': %s", (_name, input) => {
+    expect(parseApprovedAt(input)).toBeNull();
+  });
+
+  it("hora civil que não existe em São Paulo (pulo do horário de verão) é recusada, em vez de cair no dia anterior", () => {
+    expect(parseApprovedAt("2018-11-04T00:30:00")).toBeNull(); // o relógio foi de 00:00 para 01:00
+    expect(parseApprovedAt("2018-11-04T01:00:00")?.toISOString()).toBe("2018-11-04T03:00:00.000Z"); // já existe
+    expect(parseApprovedAt("2018-11-03T23:59:59")?.toISOString()).toBe("2018-11-04T02:59:59.000Z"); // ainda UTC−3: o horário de verão começa à meia-noite
+    // com offset escrito a hora é um instante real e vale
+    expect(parseApprovedAt("2018-11-04T00:30:00-03:00")?.toISOString()).toBe("2018-11-04T03:30:00.000Z");
+  });
+
+  it("o horário ambíguo (a hora que se repete na volta do horário de verão) resolve de forma determinística, no mesmo dia civil", () => {
+    expect(parseApprovedAt("2019-02-16T23:30:00")?.toISOString()).toBe("2019-02-17T01:30:00.000Z");
+  });
+
+  it("fração com mais de 3 dígitos (Python, Go, Java) é aceita e truncada para milissegundos", () => {
+    expect(parseApprovedAt("2026-03-12T10:00:00.123456+00:00")?.toISOString()).toBe("2026-03-12T10:00:00.123Z");
+    expect(parseApprovedAt("2026-03-12T10:00:00.123456789Z")?.toISOString()).toBe("2026-03-12T10:00:00.123Z");
+    expect(parseApprovedAt("2026-03-12T10:00:00.5Z")?.toISOString()).toBe("2026-03-12T10:00:00.500Z");
+    expect(parseApprovedAt("2026-03-12T10:00:00.1234567890Z")).toBeNull(); // 10 dígitos: fora do que algum cliente manda
+  });
+
   it("29 de fevereiro de ano bissexto vale", () => {
     expect(parseApprovedAt("2028-02-29T10:00:00Z")?.toISOString()).toBe("2028-02-29T10:00:00.000Z");
     expect(parseApprovedAt("2026-02-29T10:00:00Z")).toBeNull();

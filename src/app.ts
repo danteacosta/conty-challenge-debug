@@ -51,7 +51,10 @@ export function createApp(db: DatabaseSync) {
     if (!mission) return c.json({ error: "missão não encontrada" }, 404);
     const ledger = db.prepare("SELECT * FROM ledger WHERE mission_id = ? ORDER BY created_at").all(mission.id);
     const payout = one<Payout>(db, "SELECT * FROM payouts WHERE mission_id = ?", mission.id) ?? null;
-    const providerEvents = payout ? db.prepare("SELECT * FROM provider_events WHERE payout_id = ? ORDER BY id").all(payout.id) : [];
+    // Só os 100 callbacks mais recentes, em ordem cronológica: a rota não tem autenticação e a tabela cresce a cada callback.
+    const providerEvents = payout
+      ? (db.prepare("SELECT * FROM (SELECT * FROM provider_events WHERE payout_id = ? ORDER BY id DESC LIMIT 100) ORDER BY id").all(payout.id) as unknown[])
+      : [];
     return c.json({ mission, ledger, payout, provider_events: providerEvents });
   });
 

@@ -74,6 +74,16 @@ describe("pago é terminal: um callback atrasado não desfaz o repasse", () => {
     expect((await mission(app, "msn_1900")).provider_events.map((e: any) => e.outcome)).toEqual(["applied", "applied", "applied"]);
   });
 
+  it("o histórico de callbacks devolvido é limitado aos 100 mais recentes, em ordem cronológica", async () => {
+    const { app } = fresh();
+    const payout = await approvedPayout(app);
+    for (let i = 0; i < 130; i += 1) await callback(app, payout, i === 129 ? "CONFIRMED" : "PENDING");
+    const { provider_events: events } = await mission(app, "msn_1900");
+    expect(events).toHaveLength(100);
+    expect(events.at(-1)).toMatchObject({ provider_status: "CONFIRMED", outcome: "applied" });
+    expect(events[0].id).toBeLessThan(events[1].id);
+  });
+
   it("status desconhecido continua sendo 400 e não registra evento", async () => {
     const { app } = fresh();
     const payout = await approvedPayout(app);

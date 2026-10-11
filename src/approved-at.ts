@@ -7,8 +7,10 @@
  * dá o mesmo instante em qualquer máquina. Isso é uma escolha de compatibilidade: clientes que mandavam "2026-03-12T23:59:59" já
  * esperavam o horário da marca.
  */
-const SHAPE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|[+-]\d{2}:\d{2})?$/;
+const SHAPE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-]\d{2}:\d{2})?$/;
 const CIVIL_ZONE = "America/Sao_Paulo";
+const MIN_YEAR = 1970;
+const MAX_YEAR = 9998;
 
 const parts = new Intl.DateTimeFormat("en-CA", {
   timeZone: CIVIL_ZONE,
@@ -33,7 +35,9 @@ export function parseApprovedAt(input: string): Date | null {
   if (!match) return null;
   const [, y, mo, d, h, mi, s = "0", frac = "0", zone] = match;
   const [year, month, day, hour, minute, second] = [y, mo, d, h, mi, s].map(Number) as [number, number, number, number, number, number];
-  const millis = Number(frac.padEnd(3, "0"));
+  const millis = Number(frac.slice(0, 3).padEnd(3, "0")); // mais de 3 dígitos (microssegundos, nanossegundos) são truncados
+  // Ano de 4 dígitos fora de 1970..9998 é recusado: Date.UTC trata 0..99 como 1900..1999, e 9999 com offset vira o ano 10000.
+  if (year < MIN_YEAR || year > MAX_YEAR) return null;
   if (month < 1 || month > 12 || day < 1 || hour > 23 || minute > 59 || second > 59) return null;
   const civil = Date.UTC(year, month - 1, day, hour, minute, second, millis);
   if (new Date(civil).getUTCDate() !== day) return null; // o dia não existe neste mês (30 de fevereiro, 29 em ano não bissexto)
@@ -49,5 +53,8 @@ export function parseApprovedAt(input: string): Date | null {
   // Sem offset: resolve o horário civil de São Paulo para o instante. Duas passadas cobrem a troca de horário de verão histórica.
   let instant = civil - zoneOffsetMs(civil);
   instant = civil - zoneOffsetMs(instant);
+  // Um horário civil que não existe (o relógio pulou, no início do horário de verão) não é "consertado" para o dia anterior:
+  // o instante resolvido tem de voltar ao mesmo horário civil digitado, senão é recusado.
+  if (zoneOffsetMs(instant) + instant !== civil) return null;
   return new Date(instant);
 }
